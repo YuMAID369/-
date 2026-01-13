@@ -1,5 +1,5 @@
 --====================================
--- CUBNIT - TARGET VIEW (V2.1 REFINED)
+-- CUBNIT - TARGET VIEW (V3.1 FIX)
 --====================================
 
 local CoreGui = game:GetService("CoreGui")
@@ -9,9 +9,48 @@ end
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local StarterGui = game:GetService("StarterGui")
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 local Mouse = LocalPlayer:GetMouse()
+
+--====================================
+-- ESTADOS GLOBAIS
+--====================================
+local antiSitEnabled = false
+local antiSitLoop = nil
+local lastReplacedIndex = 0
+local Slots = {}
+
+--====================================
+-- MÓDULO LÓGICO: ANTI SIT
+--====================================
+local function setSeatsEnabled(enabled)
+    for _, seat in pairs(workspace:GetDescendants()) do
+        if seat:IsA("Seat") or seat:IsA("VehicleSeat") then
+            pcall(function() seat.Disabled = not enabled end)
+        end
+    end
+end
+
+local function startPreventLoop(hum)
+    if antiSitLoop then antiSitLoop:Disconnect() end
+    antiSitLoop = hum.StateChanged:Connect(function(_, newState)
+        if antiSitEnabled and newState == Enum.HumanoidStateType.Seated then
+            pcall(function()
+                hum.Sit = false
+                hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+            end)
+        end
+    end)
+end
+
+workspace.DescendantAdded:Connect(function(desc)
+    if antiSitEnabled and (desc:IsA("Seat") or desc:IsA("VehicleSeat")) then
+        pcall(function() desc.Disabled = true end)
+    end
+end)
 
 --====================================
 -- UI ROOT
@@ -23,24 +62,29 @@ Gui.ResetOnSpawn = false
 local MainFrame = Instance.new("Frame", Gui)
 MainFrame.Size = UDim2.new(0, 280, 0, 210)
 MainFrame.Position = UDim2.new(0.03, 0, 0.4, 0)
-MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
 MainFrame.Draggable = true 
 MainFrame.ClipsDescendants = true
-
-local Corner = Instance.new("UICorner", MainFrame)
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
 local UIStroke = Instance.new("UIStroke", MainFrame)
-UIStroke.Color = Color3.fromRGB(0, 200, 255)
-UIStroke.Thickness = 1.5
+UIStroke.Color = Color3.fromRGB(0, 180, 255)
+UIStroke.Thickness = 1.8
 
---====================================
--- BOTÃO MINIMIZAR (READICIONADO)
---====================================
+-- NOME DO SCRIPT (CORRIGIDO: CUBNIT)
+local ScriptTitle = Instance.new("TextLabel", MainFrame)
+ScriptTitle.Size = UDim2.new(0, 100, 0, 30)
+ScriptTitle.Position = UDim2.new(0, 12, 0, 3)
+ScriptTitle.BackgroundTransparency = 1
+ScriptTitle.Text = "CUBNIT"
+ScriptTitle.TextColor3 = Color3.fromRGB(120, 120, 120)
+ScriptTitle.Font = Enum.Font.GothamBold
+ScriptTitle.TextSize = 11
+ScriptTitle.TextXAlignment = Enum.TextXAlignment.Left
+
+-- Botão Minimizar
 local Minimized = false
-local FullSize = UDim2.new(0, 280, 0, 210)
-local SmallSize = UDim2.new(0, 280, 0, 35)
-
 local MinBtn = Instance.new("TextButton", MainFrame)
 MinBtn.Size = UDim2.new(0, 30, 0, 30)
 MinBtn.Position = UDim2.new(1, -35, 0, 2)
@@ -53,23 +97,13 @@ MinBtn.ZIndex = 10
 
 MinBtn.MouseButton1Click:Connect(function()
     Minimized = not Minimized
-    if Minimized then
-        MainFrame:TweenSize(SmallSize, "Out", "Quad", 0.3, true)
-        MinBtn.Text = "+"
-    else
-        MainFrame:TweenSize(FullSize, "Out", "Quad", 0.3, true)
-        MinBtn.Text = "-"
-    end
+    MainFrame:TweenSize(Minimized and UDim2.new(0, 280, 0, 35) or UDim2.new(0, 280, 0, 210), "Out", "Quad", 0.3, true)
+    MinBtn.Text = Minimized and "+" or "-"
 end)
 
 --====================================
 -- SISTEMA DE ABAS
 --====================================
-local TabContainer = Instance.new("Frame", MainFrame)
-TabContainer.Size = UDim2.new(0, 80, 0, 30)
-TabContainer.Position = UDim2.new(0.5, -40, 0, 5)
-TabContainer.BackgroundTransparency = 1
-
 local PageI = Instance.new("Frame", MainFrame)
 PageI.Size = UDim2.new(1, 0, 1, -40)
 PageI.Position = UDim2.new(0, 0, 0, 40)
@@ -81,104 +115,75 @@ PageII.Position = UDim2.new(0, 0, 0, 40)
 PageII.BackgroundTransparency = 1
 PageII.Visible = false
 
-local function CreateTabBtn(text, pos)
+local TabContainer = Instance.new("Frame", MainFrame)
+TabContainer.Size = UDim2.new(0, 80, 0, 30)
+TabContainer.Position = UDim2.new(0.5, -40, 0, 5)
+TabContainer.BackgroundTransparency = 1
+
+local function CreateTabBtn(text, pos, targetPage)
     local btn = Instance.new("TextButton", TabContainer)
     btn.Size = UDim2.new(0, 35, 0, 25)
     btn.Position = pos
-    btn.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+    btn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
     btn.Text = text
     btn.TextColor3 = Color3.fromRGB(255, 255, 255)
     btn.Font = Enum.Font.GothamBold
-    btn.TextSize = 14
     Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    
+    btn.MouseButton1Click:Connect(function()
+        PageI.Visible = (targetPage == PageI)
+        PageII.Visible = (targetPage == PageII)
+        BtnI.BackgroundColor3 = (targetPage == PageI) and Color3.fromRGB(0, 150, 255) or Color3.fromRGB(40, 40, 40)
+        BtnII.BackgroundColor3 = (targetPage == PageII) and Color3.fromRGB(0, 150, 255) or Color3.fromRGB(40, 40, 40)
+    end)
     return btn
 end
 
-local BtnI = CreateTabBtn("I", UDim2.new(0, 0, 0, 0))
-local BtnII = CreateTabBtn("II", UDim2.new(0, 40, 0, 0))
-
-BtnI.MouseButton1Click:Connect(function()
-    PageI.Visible = true; PageII.Visible = false
-    BtnI.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
-    BtnII.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-end)
-
-BtnII.MouseButton1Click:Connect(function()
-    PageI.Visible = false; PageII.Visible = true
-    BtnII.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
-    BtnI.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-end)
+BtnI = CreateTabBtn("I", UDim2.new(0, 0, 0, 0), PageI)
+BtnII = CreateTabBtn("II", UDim2.new(0, 40, 0, 0), PageII)
 BtnI.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
 
 --====================================
--- MODO I: LÓGICA DE SLOTS
+-- ABA I: TARGET VIEW (CORRIGIDA)
 --====================================
-local Slots = {}
-local lastReplacedIndex = 0 -- Para a lógica de substituição circular
-
-local function CreateSlot(yOffset)
+local function CreateSlot(y)
     local Slot = {Target = nil, Viewing = false, Connection = nil}
-
     local Container = Instance.new("Frame", PageI)
-    Container.Size = UDim2.new(1, -20, 0, 50)
-    Container.Position = UDim2.new(0, 10, 0, yOffset)
-    Container.BackgroundTransparency = 1
+    Container.Size = UDim2.new(1, -20, 0, 45)
+    Container.Position = UDim2.new(0, 10, 0, y)
+    Container.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    Instance.new("UICorner", Container).CornerRadius = UDim.new(0, 5)
 
-    local Avatar = Instance.new("ImageButton", Container)
-    Avatar.Size = UDim2.new(0, 40, 0, 40)
-    Avatar.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-    Avatar.Image = "rbxassetid://15132711124"
-    Instance.new("UICorner", Avatar).CornerRadius = UDim.new(1, 0)
-    local AvStroke = Instance.new("UIStroke", Avatar)
+    local Av = Instance.new("ImageButton", Container) -- Mudado para ImageButton
+    Av.Size = UDim2.new(0, 35, 0, 35)
+    Av.Position = UDim2.new(0, 5, 0, 5)
+    Av.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    Av.Image = "rbxassetid://15132711124"
+    Instance.new("UICorner", Av).CornerRadius = UDim.new(1, 0)
+    local AvStroke = Instance.new("UIStroke", Av)
     AvStroke.Color = Color3.fromRGB(60, 60, 60)
     AvStroke.Thickness = 2
 
-    local Box = Instance.new("TextBox", Container)
-    Box.Size = UDim2.new(1, -55, 0, 30)
-    Box.Position = UDim2.new(0, 50, 0, 5)
-    Box.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    Box.TextColor3 = Color3.fromRGB(200, 200, 200)
-    Box.PlaceholderText = "Nome ou Prefixo..."
-    Box.Text = ""
-    Box.Font = Enum.Font.Gotham
-    Box.TextSize = 12
-    Instance.new("UICorner", Box).CornerRadius = UDim.new(0, 4)
+    local Txt = Instance.new("TextBox", Container)
+    Txt.Size = UDim2.new(1, -60, 0, 30)
+    Txt.Position = UDim2.new(0, 50, 0, 7)
+    Txt.BackgroundTransparency = 1
+    Txt.Text = ""
+    Txt.PlaceholderText = "Nome ou Prefixo..."
+    Txt.TextColor3 = Color3.fromRGB(200, 200, 200)
+    Txt.Font = Enum.Font.Gotham
+    Txt.TextSize = 14
 
-    Slot.UpdateTarget = function(Plr)
-        if not Plr then return end
-        Slot.Target = Plr
-        Box.Text = Plr.DisplayName
-        Box.TextColor3 = Color3.fromRGB(0, 255, 150)
-        local Thumb = Players:GetUserThumbnailAsync(Plr.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size150x150)
-        Avatar.Image = Thumb
+    Slot.UpdateTarget = function(plr)
+        if not plr then return end
+        Slot.Target = plr
+        Txt.Text = plr.DisplayName
+        Txt.TextColor3 = Color3.fromRGB(0, 255, 150)
+        Av.Image = Players:GetUserThumbnailAsync(plr.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size150x150)
     end
 
-    -- Limpar slot se o texto for apagado
-    Box:GetPropertyChangedSignal("Text"):Connect(function()
-        if Box.Text == "" then
-            Slot.Target = nil
-            Avatar.Image = "rbxassetid://15132711124"
-            Box.TextColor3 = Color3.fromRGB(200, 200, 200)
-            if Slot.Connection then Slot.Connection:Disconnect() end
-            Slot.Viewing = false
-            AvStroke.Color = Color3.fromRGB(60, 60, 60)
-        end
-    end)
-
-    Box.FocusLost:Connect(function()
-        if Box.Text ~= "" then
-            local Name = Box.Text:lower()
-            local Found = nil
-            for _, v in pairs(Players:GetPlayers()) do
-                if v.Name:lower():sub(1, #Name) == Name or v.DisplayName:lower():sub(1, #Name) == Name then
-                    Found = v; break
-                end
-            end
-            if Found then Slot.UpdateTarget(Found) end
-        end
-    end)
-
-    Avatar.MouseButton1Click:Connect(function()
+    -- FUNÇÃO DE VIEW (REATIVADA)
+    Av.MouseButton1Click:Connect(function()
         if not Slot.Target then return end
         Slot.Viewing = not Slot.Viewing
         if Slot.Viewing then
@@ -193,88 +198,79 @@ local function CreateSlot(yOffset)
             if Slot.Connection then Slot.Connection:Disconnect() end
             AvStroke.Color = Color3.fromRGB(60, 60, 60)
             Camera.CameraSubject = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+            Camera.CameraType = Enum.CameraType.Custom
+        end
+    end)
+
+    Txt.FocusLost:Connect(function()
+        if Txt.Text ~= "" then
+            local n = Txt.Text:lower()
+            local found = nil
+            for _, v in pairs(Players:GetPlayers()) do
+                if v.Name:lower():sub(1, #n) == n or v.DisplayName:lower():sub(1, #n) == n then found = v; break end
+            end
+            if found then Slot.UpdateTarget(found) end
         end
     end)
 
     table.insert(Slots, Slot)
 end
 
-CreateSlot(0); CreateSlot(55); CreateSlot(110)
+CreateSlot(0); CreateSlot(50); CreateSlot(100)
 
 --====================================
--- MODO II: TOOLS
+-- ABA II: BOTÕES
 --====================================
-local function CreateExtraBtn(text, yPos, color, callback)
+local function CreateGridBtn(text, pos, size, callback)
     local btn = Instance.new("TextButton", PageII)
-    btn.Size = UDim2.new(0, 200, 0, 35)
-    btn.Position = UDim2.new(0.5, -100, 0, yPos)
-    btn.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+    btn.Size = size
+    btn.Position = pos
+    btn.BackgroundColor3 = Color3.fromRGB(0, 80, 100)
     btn.Text = text
-    btn.TextColor3 = color
+    btn.TextColor3 = Color3.fromRGB(0, 0, 0)
     btn.Font = Enum.Font.GothamBold
     btn.TextSize = 14
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
-    Instance.new("UIStroke", btn).Color = color
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
     btn.MouseButton1Click:Connect(callback)
+    return btn
 end
 
-CreateExtraBtn("EMOTES", 10, Color3.fromRGB(200, 100, 255), function()
+CreateGridBtn("Emotes", UDim2.new(0, 10, 0, 10), UDim2.new(0, 120, 0, 35), function()
     loadstring(game:HttpGet("https://rawscripts.net/raw/Universal-Script-7yd7-I-Emote-Script-48024"))()
     loadstring(game:HttpGet("https://scriptblox.com/raw/Brookhaven-RP-all-emotes-6849"))()
 end)
 
-CreateExtraBtn("TOOL TELEPORTE", 55, Color3.fromRGB(0, 255, 150), function()
-    local TPTool = Instance.new("Tool")
-    TPTool.Name = "Teleport Click"
-    TPTool.RequiresHandle = false
-    TPTool.Parent = LocalPlayer.Backpack
-    TPTool.Activated:Connect(function()
-        if LocalPlayer.Character then
-            LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(Mouse.Hit.p + Vector3.new(0, 3, 0))
-        end
-    end)
+CreateGridBtn("ToolTP", UDim2.new(0, 10, 0, 55), UDim2.new(0, 120, 0, 35), function()
+    local tool = Instance.new("Tool", LocalPlayer.Backpack)
+    tool.Name = "ToolTP"; tool.RequiresHandle = false
+    tool.Activated:Connect(function() LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(Mouse.Hit.p + Vector3.new(0,3,0)) end)
 end)
 
--- LÓGICA TÉCNICA DO CLICK NAME
-CreateExtraBtn("CLICK NAME (TOOL)", 100, Color3.fromRGB(255, 200, 0), function()
-    local ClickTool = Instance.new("Tool")
-    ClickTool.Name = "Capture Target"
-    ClickTool.RequiresHandle = false
-    ClickTool.Parent = LocalPlayer.Backpack
-    
-    ClickTool.Activated:Connect(function()
-        local target = Mouse.Target
-        if target and target.Parent then
-            local plr = Players:GetPlayerFromCharacter(target.Parent) or Players:GetPlayerFromCharacter(target.Parent.Parent)
-            if plr then
-                -- 1. Tenta achar um slot vazio primeiro
+CreateGridBtn("ClickName", UDim2.new(0, 10, 0, 100), UDim2.new(0, 120, 0, 35), function()
+    local tool = Instance.new("Tool", LocalPlayer.Backpack)
+    tool.Name = "ClickName"; tool.RequiresHandle = false
+    tool.Activated:Connect(function()
+        local t = Mouse.Target
+        if t and t.Parent then
+            local p = Players:GetPlayerFromCharacter(t.Parent) or Players:GetPlayerFromCharacter(t.Parent.Parent)
+            if p then
                 local filled = false
-                for _, slot in pairs(Slots) do
-                    if slot.Target == nil then
-                        slot.UpdateTarget(plr)
-                        filled = true
-                        break
-                    end
-                end
-                
-                -- 2. Se todos estiverem cheios, substitui o próximo na fila (Circular)
-                if not filled then
-                    lastReplacedIndex = (lastReplacedIndex % #Slots) + 1
-                    Slots[lastReplacedIndex].UpdateTarget(plr)
-                end
+                for _, s in pairs(Slots) do if not s.Target then s.UpdateTarget(p); filled = true; break end end
+                if not filled then lastReplacedIndex = (lastReplacedIndex % #Slots) + 1; Slots[lastReplacedIndex].UpdateTarget(p) end
             end
         end
     end)
 end)
 
--- Header Final
-local Header = Instance.new("TextLabel", MainFrame)
-Header.Size = UDim2.new(0, 120, 0, 30)
-Header.Position = UDim2.new(0, 10, 0, 5)
-Header.BackgroundTransparency = 1
-Header.Text = "CUBNIT"
-Header.TextColor3 = Color3.fromRGB(120, 120, 120)
-Header.Font = Enum.Font.GothamBold
-Header.TextSize = 10
-Header.TextXAlignment = Enum.TextXAlignment.Left
+CreateGridBtn("ANTI SIT", UDim2.new(0, 140, 0, 10), UDim2.new(0, 130, 0, 35), function()
+    antiSitEnabled = not antiSitEnabled
+    setSeatsEnabled(not antiSitEnabled)
+    StarterGui:SetCore("SendNotification", {Title = "Anti Sit", Text = antiSitEnabled and "ATIVADO ✅" or "DESATIVADO ❌", Duration = 2})
+    if antiSitEnabled and LocalPlayer.Character then LocalPlayer.Character.Humanoid.Sit = false end
+end)
 
+--====================================
+-- INIT
+--====================================
+LocalPlayer.CharacterAdded:Connect(function(char) startPreventLoop(char:WaitForChild("Humanoid")) end)
+if LocalPlayer.Character then startPreventLoop(LocalPlayer.Character:WaitForChild("Humanoid")) end
